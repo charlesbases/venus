@@ -27,21 +27,16 @@ var root = func() string {
 var lock sync.RWMutex
 
 // 已下载的资源列表
-var resource = func() []string {
-	var res []string
+var resource = func() map[string]struct{} {
+	var res = make(map[string]struct{}, 0)
 	filepath.Walk(
 		root, func(path string, info fs.FileInfo, err error) error {
 			if err != nil {
 				return filepath.SkipAll
 			}
 
-			if !info.IsDir() {
-				// 删除未下载完成的视频
-				if len(strings.Split(filepath.Base(path), ".")) < 2 {
-					os.Remove(path)
-				} else {
-					res = append(res, filepath.Base(path))
-				}
+			if !info.IsDir() && strings.HasSuffix(path, format) {
+				res[pathSplit(path)] = struct{}{}
 			}
 			return nil
 		},
@@ -57,6 +52,23 @@ func SetConcurrent(c int) {
 	if c > 0 {
 		concurrent = c
 	}
+}
+
+// pathJoin .
+func pathJoin(v ...string) string {
+	return strings.Join(v, "/")
+}
+
+// pathSplit .
+func pathSplit(v string) string {
+	v = strings.TrimPrefix(v, root)
+	if len(v) > 0 {
+		s := strings.Split(v, string(v[0]))
+		if len(s) > 2 {
+			return pathJoin(s[1], s[len(s)-1])
+		}
+	}
+	return ""
 }
 
 // ResolutionRule 分辨率排序规则
@@ -127,7 +139,7 @@ func (v Video) commit() () {
 	os.Rename(v.store, store)
 
 	lock.Lock()
-	resource = append(resource, store)
+	resource[pathSplit(store)] = struct{}{}
 	lock.Unlock()
 }
 
@@ -154,12 +166,8 @@ func (u *UserInfor) exists(h *Header) bool {
 	lock.RLock()
 	defer lock.RUnlock()
 
-	for _, item := range resource {
-		if strings.HasPrefix(item, filepath.Join(u.Root.String(), h.ID)) {
-			return true
-		}
-	}
-	return false
+	_, found := resource[pathJoin(u.Root.String(), h.ID+"."+format)]
+	return found
 }
 
 // create .
