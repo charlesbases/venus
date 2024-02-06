@@ -3,9 +3,11 @@ package website
 import (
 	"bufio"
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"io"
 	"net/http"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -16,11 +18,18 @@ import (
 var (
 	// ErrorCodeUnkown .
 	ErrorCodeUnkown errorCode = -1
-	// ErrorCodeNotFound 404
-	ErrorCodeNotFound errorCode = 404
+	// ErrorCodeFour 404
+	ErrorCodeFour = func(code int) errorCode {
+		return errorCode(code)
+	}
 )
 
-var defaultClient = &http.Client{Timeout: 15 * time.Minute}
+var defaultClient = &http.Client{
+	Transport: &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	},
+	Timeout: 15 * time.Minute,
+}
 
 var defaultHeader = map[string]string{
 	// "Content-Type": "application/json",
@@ -72,7 +81,20 @@ type Metadata struct {
 	Method string
 	Header map[string]string
 	Data   interface{}
-	body   io.Reader
+	// 优先执行 command
+	Command func() (io.Reader, error)
+	body    io.Reader
+}
+
+// NewCommand TODO
+func NewCommand(cmd *exec.Cmd) func() (io.Reader, error) {
+	return func() (io.Reader, error) {
+		output, err := cmd.Output()
+		if err != nil {
+			return nil, err
+		}
+		return bytes.NewReader(output), nil
+	}
 }
 
 // fetch .
@@ -80,6 +102,15 @@ func fetch(l Link, fn reader, opts ...func(meta *Metadata)) error {
 	var meta = &Metadata{Method: http.MethodGet, Header: make(map[string]string, 0)}
 	for _, opt := range opts {
 		opt(meta)
+	}
+
+	// command?
+	if meta.Command != nil {
+		reader, err := meta.Command()
+		if err != nil {
+			return err
+		}
+		return fn(reader)
 	}
 
 	if meta.Data != nil {
@@ -92,10 +123,13 @@ func fetch(l Link, fn reader, opts ...func(meta *Metadata)) error {
 		return errors.Wrap(err, "http")
 	}
 
-	for key, val := range defaultHeader {
-		req.Header.Add(key, val)
-	}
+	var header = defaultHeader
 	for key, val := range meta.Header {
+		header[key] = val
+	}
+
+	// 自定义 header 覆盖默认 header
+	for key, val := range header {
 		req.Header.Add(key, val)
 	}
 
@@ -105,11 +139,11 @@ func fetch(l Link, fn reader, opts ...func(meta *Metadata)) error {
 	}
 	defer resp.Body.Close()
 
-	switch resp.StatusCode {
-	case 200:
+	switch resp.StatusCode / 100 {
+	case 2:
 		return errors.Wrap(fn(resp.Body), l.String())
-	case 404:
-		return errors.Wrap(ErrorCodeNotFound, l.String())
+	case 4:
+		return errors.Wrap(ErrorCodeFour(resp.StatusCode), l.String())
 	default:
 		return errors.Wrap(ErrorCodeUnkown, l.String())
 	}

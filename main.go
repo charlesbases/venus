@@ -10,6 +10,7 @@ import (
 	"github.com/charlesbases/venus/logger"
 	"github.com/charlesbases/venus/regexp"
 	"github.com/charlesbases/venus/website"
+	"github.com/charlesbases/venus/website/spankbang"
 	"github.com/charlesbases/venus/website/xvideos"
 )
 
@@ -19,6 +20,7 @@ var domain = regexp.New(`https://([^/]+)`)
 // homeHook 视频网站首页
 var homeHook = map[string]func(link website.Link) website.WebHook{
 	"www.xvideos.com": xvideos.New,
+	"spankbang.com":   spankbang.New,
 }
 
 var app = &cli.App{

@@ -4,7 +4,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 
@@ -71,38 +70,6 @@ func pathSplit(v string) string {
 	return ""
 }
 
-// ResolutionRule 分辨率排序规则
-type ResolutionRule struct {
-	// 分辨率列表
-	list []string
-	// 分辨率排序规则
-	rule func(v string) int
-}
-
-// NewResolutionRule .
-func NewResolutionRule(rule func(v string) int) *ResolutionRule {
-	return &ResolutionRule{rule: rule, list: make([]string, 0, 8)}
-}
-
-// Add .
-func (r *ResolutionRule) Add(v string) {
-	r.list = append(r.list, v)
-}
-
-// Best .
-func (r *ResolutionRule) Best() string {
-	if len(r.list) != 0 {
-		// 根据 rule 规则对 list 排序
-		sort.Slice(
-			r.list, func(i, j int) bool {
-				return r.rule(r.list[i]) > r.rule(r.list[j])
-			},
-		)
-		return r.list[0]
-	}
-	return ""
-}
-
 // Header .
 type Header struct {
 	// 视频 ID
@@ -124,6 +91,8 @@ type Video struct {
 	store string
 	// hls 链接
 	HLink Link
+	// Metadata for http
+	Metadata *Metadata
 	// 视频分片链接列表
 	Parts []Link
 }
@@ -260,23 +229,31 @@ func iterator(v interface{}, stop func()) {
 	if video, err := hook.ParseVideo(header); err != nil {
 		header.throwError(err)
 	} else {
-		if file, err := user.create(video); err != nil {
-			header.throwError(err)
-		} else {
-			var err error
-			// 视频分片下载
-			for _, part := range video.Parts {
-				if err = part.Fetch(WriteTo(file)); err != nil {
-					header.throwError(err)
-					break
-				}
-			}
-			file.Close()
-
-			if err != nil {
-				video.remove()
+		if len(video.Parts) != 0 {
+			if file, err := user.create(video); err != nil {
+				header.throwError(err)
 			} else {
-				video.commit()
+				var err error
+				// 视频分片下载
+				for _, part := range video.Parts {
+					if err = part.Fetch(
+						WriteTo(file), func(meta *Metadata) {
+							if video.Metadata != nil {
+								video.Metadata = video.Metadata
+							}
+						},
+					); err != nil {
+						header.throwError(err)
+						break
+					}
+				}
+				file.Close()
+
+				if err != nil {
+					video.remove()
+				} else {
+					video.commit()
+				}
 			}
 		}
 	}

@@ -1,6 +1,7 @@
 package xvideos
 
 import (
+	"sort"
 	"strconv"
 	"strings"
 
@@ -12,16 +13,6 @@ import (
 var _ website.WebHook = (*xvideos)(nil)
 
 const root website.Link = "https://www.xvideos.com"
-
-var resolution = func(v string) int {
-	prefixs := []string{"hls-1080p"}
-	for idx, prefix := range prefixs {
-		if strings.HasPrefix(v, prefix) {
-			return len(prefixs) - idx
-		}
-	}
-	return -1
-}
 
 // xvideos .
 type xvideos struct {
@@ -43,6 +34,13 @@ func (x *xvideos) UserInfor() (*website.UserInfor, error) {
 
 	// unknown
 	return nil, errors.Errorf("%s: unknown link type", x.src)
+}
+
+// UserVideosResponse 艺术家主页
+type UserVideosResponse struct {
+	Videos []*struct {
+		U string `json:"u"`
+	} `json:"videos"`
 }
 
 // parseUserInforFromUserLink .
@@ -80,13 +78,6 @@ func (x *xvideos) parseUserInforFromUserLink() (*website.UserInfor, error) {
 		page++
 	}
 	return x.user, nil
-}
-
-// UserVideosResponse 艺术家主页
-type UserVideosResponse struct {
-	Videos []*struct {
-		U string `json:"u"`
-	} `json:"videos"`
 }
 
 // parseUserInforFromVideoLink .
@@ -128,16 +119,52 @@ func (x *xvideos) ParseVideo(h *website.Header) (*website.Video, error) {
 	return x.parseVideoParts(video), nil
 }
 
+type resolution struct {
+	list []string
+	rule func(v string) int
+}
+
+// add .
+func (r *resolution) add(v string) () {
+	if r.rule(v) > 0 {
+		r.list = append(r.list, v)
+	}
+}
+
+// best .
+func (r *resolution) best() string {
+	sort.Slice(
+		r.list, func(i, j int) bool {
+			return r.list[i] > r.list[j]
+		},
+	)
+	return r.list[0]
+}
+
+// newResolutionRule .
+func newResolutionRule() *resolution {
+	return &resolution{
+		rule: func(v string) int {
+			for i, j := range []string{"hls-1080p"} {
+				if strings.HasPrefix(v, j) {
+					return i + 1
+				}
+			}
+			return -1
+		},
+	}
+}
+
 // parseVideoParts .
 func (x *xvideos) parseVideoParts(video *website.Video) *website.Video {
-	var rst = website.NewResolutionRule(resolution)
+	var rst = newResolutionRule()
 
 	// 分辨率
 	video.HLink.Joins("hls.m3u8").Fetch(
 		website.ReadLine(
 			func(line string) (isBreak bool) {
 				if !strings.HasPrefix(line, "#") {
-					rst.Add(line)
+					rst.add(line)
 				}
 				return false
 			},
@@ -146,7 +173,7 @@ func (x *xvideos) parseVideoParts(video *website.Video) *website.Video {
 
 	// 	视频下载列表
 	video.Parts = make([]website.Link, 0)
-	video.HLink.Joins(rst.Best()).Fetch(
+	video.HLink.Joins(rst.best()).Fetch(
 		website.ReadLine(
 			func(line string) (isBreak bool) {
 				if !strings.HasPrefix(line, "#") {
