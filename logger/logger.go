@@ -3,43 +3,55 @@ package logger
 import (
 	"fmt"
 	"os"
-	"sync"
+
+	"github.com/charlesbases/venus/tools"
 )
 
 const stream = "error.log"
 
-var file *os.File
-
-var lock sync.RWMutex
+var log struct {
+	f *os.File
+	c chan string
+}
 
 // Create .
 func Create() error {
-	f, err := os.OpenFile(stream, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	f, err := tools.CreateFile(stream)
 	if err != nil {
 		return err
 	}
-	file = f
+	log.f = f
+	log.c = make(chan string)
+	go daemon()
 	return nil
+}
+
+// daemon .
+func daemon() () {
+	for {
+		select {
+		case mess, ok := <-log.c:
+			if !ok {
+				log.f.Sync()
+				log.f.Close()
+				return
+			}
+			log.f.WriteString(mess + "\n")
+		}
+	}
 }
 
 // Error .
 func Error(v interface{}) () {
-	lock.Lock()
-	file.WriteString(fmt.Sprintf(`%v`, v))
-	lock.Unlock()
+	log.c <- fmt.Sprintf(`%v`, v)
 }
 
 // Errorf .
-func Errorf(format string, v ...interface{}) {
-	lock.Lock()
-	file.WriteString(fmt.Sprintf(format, v...))
-	lock.Unlock()
+func Errorf(format string, v ...interface{}) () {
+	log.c <- fmt.Sprintf(format, v...)
 }
 
 // Close .
-func Close() {
-	if file != nil {
-		file.Sync()
-		file.Close()
-	}
+func Close() () {
+	close(log.c)
 }

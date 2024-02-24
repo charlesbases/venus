@@ -1,8 +1,8 @@
 # file
-*.mkv
 *.mp4
 *.txt
 *.log
+*.json
 
 # folder
 resp/

@@ -1,24 +1,26 @@
 package xvideos
 
-import "github.com/charlesbases/venus/regexp"
+import "github.com/charlesbases/venus/types"
 
 var (
 	// 用户链接
-	compileIsUserLink = regexp.New(`https://www.xvideos.com/.*/[a-zA-Z0-9_-]+`)
+	cpIsUserLink = types.MustCompile(`https://www.xvideos.com/.*/[a-zA-Z0-9_-]+`)
 	// 视频链接
-	compileIsVideoLink = regexp.New(`https://www.xvideos.com/video[0-9]+/_`)
+	cpIsVideoLink = types.MustCompile(`https://www.xvideos.com/video[0-9]+/_`)
 )
 
 // 根据视频链接获取视频 ID
-var compileParseVideoIDFromLink = regexp.New(`https://www[.]xvideos[.]com/video([0-9]+)`)
+var cpParseVideoIDFromLink = types.MustCompile(`https://www[.]xvideos[.]com/video([0-9]+)`)
 
 var (
+	// 视频分辨率
+	cpResolution = types.MustCompile(`hls-(.*)-.*`)
 	// 根据视频链接获取用户 id
-	compileParseUserIDFromLink = regexp.New(`https://www.xvideos.com/.*/(.*)`)
+	cpParseUserIDFromLink = types.MustCompile(`https://www.xvideos.com/.*/(.*)`)
 	// 根据用户首页的视频列表获取视频 id
-	complieParseVideoIDFromUserHomePage = regexp.New(`.*/([1-9]+.*)`)
+	cpParseVideoIDFromUserHomePage = types.MustCompile(`.*/([1-9]+.*)`)
 	// 根据用户首页的视频列表获取视频下载链接
-	complieParseHLinkFromUserHomePage = regexp.New(`html5player[.]setVideoHLS[(]'(.*)/hls.m3u8'[)];`)
+	cpParseHLinkFromUserHomePage = types.MustCompile(`html5player[.]setVideoHLS[(]'(.*)/hls.m3u8'[)];`)
 	// 根据用户首页的视频列表获取用户 ID
-	compileParseUserIDFromUserHomePage = regexp.New(`html5player[.]setUploaderName[(]'(.*)'[)];`)
+	cpParseUserIDFromUserHomePage = types.MustCompile(`html5player[.]setUploaderName[(]'(.*)'[)];`)
 )

@@ -1,51 +1,70 @@
 package xvideos
 
 import (
-	"sort"
 	"strconv"
 	"strings"
 
-	"github.com/pkg/errors"
-
+	"github.com/charlesbases/venus/sender"
+	"github.com/charlesbases/venus/types"
 	"github.com/charlesbases/venus/website"
 )
 
-var _ website.WebHook = (*xvideos)(nil)
+const domain = "xvideos.com"
 
-const root website.Link = "https://www.xvideos.com"
+var webhome = types.Link("https://www.xvideos.com")
+
+// 视频分辨率优先级
+var tendency = []string{"hls-1080p"}
+
+var _ website.WebHook = (*xvideos)(nil)
 
 // xvideos .
 type xvideos struct {
-	src  website.Link
-	user *website.UserInfor
+	base   types.LinkPath
+	sender sender.Sender
 }
 
-// UserInfor 用户视频信息
+// New .
+func New(link types.LinkPath) website.WebHook {
+	return &xvideos{
+		base:   link,
+		sender: sender.HTTPSender,
+	}
+}
+
+// Sender .
+func (x *xvideos) Sender() sender.Sender {
+	return x.sender
+}
+
+// UserInfor .
 func (x *xvideos) UserInfor() (*website.UserInfor, error) {
 	// user
-	if compileIsUserLink.MatchString(x.src.String()) {
-		return x.parseUserInforFromUserLink()
+	if cpIsUserLink.MatchString(x.base.String()) {
+		return x.fromUserLink()
 	}
 
 	// video
-	if compileIsVideoLink.MatchString(x.src.String()) {
-		return x.parseUserInforFromVideoLink()
+	if cpIsVideoLink.MatchString(x.base.String()) {
+		return x.fromVideoLink()
 	}
 
 	// unknown
-	return nil, errors.Errorf("%s: unknown link type", x.src)
+	return nil, types.NewSenderError(x.base.String(), website.ErrLinkType)
 }
 
-// UserVideosResponse 艺术家主页
+// UserVideosResponse .
 type UserVideosResponse struct {
 	Videos []*struct {
-		U string `json:"u"`
+		ID int    `json:"id"`
+		TF string `json:"tf"`
+		U  string `json:"u"`
 	} `json:"videos"`
 }
 
-// parseUserInforFromUserLink .
-func (x *xvideos) parseUserInforFromUserLink() (*website.UserInfor, error) {
-	x.user.ID = compileParseUserIDFromLink.FindSubString(x.src.String())
+// fromUserLink .
+func (x *xvideos) fromUserLink() (*website.UserInfor, error) {
+	user := &website.UserInfor{ID: cpParseUserIDFromLink.FindSubString(x.base.String()), Root: domain}
 
 	// 获取视频列表
 	var page int
@@ -53,7 +72,9 @@ func (x *xvideos) parseUserInforFromUserLink() (*website.UserInfor, error) {
 		var resp = new(UserVideosResponse)
 
 		// 格式错误
-		if err := x.src.Joins("videos", "new", strconv.Itoa(page)).Fetch(website.Unmarshal(resp)); err != nil {
+		if err := x.Sender().SendRequest(
+			x.base.PathJoin("videos", "new", strconv.Itoa(page)).String(), sender.Unmarshal(resp),
+		); err != nil {
 			return nil, err
 		}
 
@@ -63,136 +84,107 @@ func (x *xvideos) parseUserInforFromUserLink() (*website.UserInfor, error) {
 		}
 
 		for _, video := range resp.Videos {
-			if suffix := complieParseVideoIDFromUserHomePage.FindSubString(video.U); len(suffix) != 0 {
-				l := root.Joins("video" + suffix)
-
-				x.user.Videos = append(
-					x.user.Videos,
-					&website.Header{
-						ID:   compileParseVideoIDFromLink.FindSubString(l.String()),
-						Link: l,
+			if suffix := cpParseVideoIDFromUserHomePage.FindSubString(video.U); len(suffix) != 0 {
+				user.Videos = append(
+					user.Videos, &website.Header{
+						Title:    video.TF,
+						VideoID:  strconv.Itoa(video.ID),
+						LinkPath: webhome.PathJoin("video" + suffix),
 					},
 				)
 			}
 		}
 		page++
 	}
-	return x.user, nil
+
+	return user, nil
 }
 
-// parseUserInforFromVideoLink .
-func (x *xvideos) parseUserInforFromVideoLink() (*website.UserInfor, error) {
-	x.user.Videos = append(
-		x.user.Videos, &website.Header{
-			ID:   compileParseVideoIDFromLink.FindSubString(x.src.String()),
-			Link: x.src,
+// fromVideoLink .
+func (x *xvideos) fromVideoLink() (*website.UserInfor, error) {
+	return &website.UserInfor{
+		Root: domain,
+		Videos: []*website.Header{
+			{
+				VideoID:  cpParseVideoIDFromLink.FindSubString(x.base.String()),
+				LinkPath: x.base,
+			},
 		},
-	)
-	return x.user, nil
+	}, nil
 }
 
-// ParseVideo 根据视频网页链接，获取下载地址
-func (x *xvideos) ParseVideo(h *website.Header) (*website.Video, error) {
+// ParseHeader .
+func (x *xvideos) ParseHeader(h *website.Header) (*website.Video, error) {
 	video := &website.Video{Header: h}
 
 	// parse hls link
-	if err := h.Link.Fetch(
-		website.ReadLine(
-			func(line string) (isBreak bool) {
-				if len(video.HLink) == 0 {
-					video.HLink = website.Link(complieParseHLinkFromUserHomePage.FindSubString(line))
+	var hls types.LinkPath
+	if err := x.Sender().SendRequest(
+		h.LinkPath.String(), sender.ReadLine(
+			func(v string) (isBreak bool) {
+				if link := cpParseHLinkFromUserHomePage.FinsSubStringBeforePrefix(
+					v, "html5player.setVideoHLS",
+				); len(link) != 0 {
+					hls = types.Link(link)
+					return true
 				}
-				if len(x.user.ID) == 0 {
-					x.user.ID = compileParseUserIDFromUserHomePage.FindSubString(line)
-				}
-				return len(x.user.ID) != 0 && len(video.HLink) != 0
+				return false
 			},
 		),
 	); err != nil {
 		return nil, err
 	}
 
-	if len(video.HLink) == 0 {
-		return nil, errors.New("not found")
-	}
+	// 解析分辨率
+	r := newResolution()
+	x.Sender().SendRequest(
+		hls.PathJoin("hls.m3u8").String(), sender.ReadLine(
+			func(v string) (isBreak bool) {
+				r.add(v)
+				return false
+			},
+		),
+	)
 
-	return x.parseVideoParts(video), nil
+	// 视频分片下载列表
+	if best := r.best(); len(best) != 0 {
+		x.Sender().SendRequest(
+			hls.PathJoin(best).String(), sender.ReadLine(
+				func(v string) (isBreak bool) {
+					if !strings.HasPrefix(v, "#") {
+						video.Parts = append(video.Parts, hls.PathJoin(v))
+					}
+					return false
+				},
+			),
+		)
+	}
+	return video, nil
 }
 
+// resolution .
 type resolution struct {
-	list []string
-	rule func(v string) int
+	data map[string]string
+}
+
+// newResolution .
+func newResolution() *resolution {
+	return &resolution{data: make(map[string]string)}
 }
 
 // add .
 func (r *resolution) add(v string) () {
-	if r.rule(v) > 0 {
-		r.list = append(r.list, v)
+	if str := cpResolution.FinsSubStringBeforePrefix(v, "hls"); len(str) != 0 {
+		r.data["hls-"+str] = v
 	}
 }
 
 // best .
 func (r *resolution) best() string {
-	sort.Slice(
-		r.list, func(i, j int) bool {
-			return r.list[i] > r.list[j]
-		},
-	)
-	return r.list[0]
-}
-
-// newResolutionRule .
-func newResolutionRule() *resolution {
-	return &resolution{
-		rule: func(v string) int {
-			for i, j := range []string{"hls-1080p"} {
-				if strings.HasPrefix(v, j) {
-					return i + 1
-				}
-			}
-			return -1
-		},
+	for i := range tendency {
+		if v, found := r.data[tendency[i]]; found {
+			return v
+		}
 	}
-}
-
-// parseVideoParts .
-func (x *xvideos) parseVideoParts(video *website.Video) *website.Video {
-	var rst = newResolutionRule()
-
-	// 分辨率
-	video.HLink.Joins("hls.m3u8").Fetch(
-		website.ReadLine(
-			func(line string) (isBreak bool) {
-				if !strings.HasPrefix(line, "#") {
-					rst.add(line)
-				}
-				return false
-			},
-		),
-	)
-
-	// 	视频下载列表
-	video.Parts = make([]website.Link, 0)
-	video.HLink.Joins(rst.best()).Fetch(
-		website.ReadLine(
-			func(line string) (isBreak bool) {
-				if !strings.HasPrefix(line, "#") {
-					video.Parts = append(video.Parts, video.HLink.Joins(line))
-				}
-				return false
-			},
-		),
-	)
-
-	return video
-}
-
-// New .
-func New(src website.Link) website.WebHook {
-	return &xvideos{
-		src: src,
-		user: &website.UserInfor{
-			Root: "xvideos.com",
-		},
-	}
+	return ""
 }
