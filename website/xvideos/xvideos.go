@@ -89,7 +89,7 @@ func (x *xvideos) fromUserLink() (*website.UserInfor, error) {
 					user.Videos, &website.Header{
 						Title:    video.TF,
 						VideoID:  strconv.Itoa(video.ID),
-						LinkPath: webhome.PathJoin("video" + suffix),
+						LinkPath: webhome.PathJoin("video." + suffix),
 					},
 				)
 			}

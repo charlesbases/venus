@@ -18,7 +18,7 @@ var (
 	// 根据视频链接获取用户 id
 	cpParseUserIDFromLink = types.MustCompile(`https://www.xvideos.com/.*/(.*)`)
 	// 根据用户首页的视频列表获取视频 id
-	cpParseVideoIDFromUserHomePage = types.MustCompile(`.*/([1-9]+.*)`)
+	cpParseVideoIDFromUserHomePage = types.MustCompile(`/prof-video-click/upload/[^/]*/(.*)`)
 	// 根据用户首页的视频列表获取视频下载链接
 	cpParseHLinkFromUserHomePage = types.MustCompile(`html5player[.]setVideoHLS[(]'(.*)/hls.m3u8'[)];`)
 	// 根据用户首页的视频列表获取用户 ID
